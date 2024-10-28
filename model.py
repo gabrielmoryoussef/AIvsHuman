@@ -116,58 +116,6 @@ def create_document_word_matrices(df: pd.DataFrame, vectorizer: CountVectorizer,
     
     return D_h_freq, D_ai_freq
 
-def analyze_text_topics(df: pd.DataFrame, num_topics: int, 
-                       human_col: str = 'human', 
-                       ai_col: str = 'ChatGPT', 
-                       **topic_score_kwargs) -> Dict:
-    """
-    Analyze topics in human and AI text using Topic SCORE algorithm.
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        DataFrame containing human and AI text columns
-    num_topics : int
-        Number of topics to extract
-    human_col : str
-        Name of the column containing human text
-    ai_col : str
-        Name of the column containing AI text
-    topic_score_kwargs : dict
-        Additional arguments to pass to topic_score function
-        
-    Returns:
-    --------
-    dict
-        Dictionary containing:
-        - 'A_h': Human topic matrix
-        - 'A_ai': AI topic matrix
-        - 'vocabulary': List of words in vocabulary
-        - 'vectorizer': Fitted CountVectorizer
-        - 'D_h': Human document-word frequency matrix
-        - 'D_ai': AI document-word frequency matrix
-    """
-    # Create vocabulary
-    vectorizer = create_vocabulary(df, human_col, ai_col)
-    
-    # Create document-word matrices
-    D_h, D_ai = create_document_word_matrices(df, vectorizer, human_col, ai_col)
-    # Run topic_score on both matrices
-    results_h = topic_score(num_topics, D_h, **topic_score_kwargs)
-    results_ai = topic_score(num_topics, D_ai, **topic_score_kwargs)
-    
-    # Extract word-topic matrices
-    A_h = results_h['A_hat']
-    A_ai = results_ai['A_hat']
-    
-    return {
-        'A_h': A_h,
-        'A_ai': A_ai,
-        'vocabulary': vectorizer.get_feature_names_out(),
-        'vectorizer': vectorizer,
-        'D_h': D_h,
-        'D_ai': D_ai
-    }
 
 def filter_words(A_h: np.ndarray, A_ai: np.ndarray, t: float, vocabulary: np.ndarray = None) -> dict:
     """
@@ -408,7 +356,7 @@ if __name__ == "__main__":
     parser.add_argument('--K', type=int, default=3, help='Number of topics (if no CV)')
     parser.add_argument('--threshold', type=float, default=0.001, help='Threshold value (if no CV)')
     parser.add_argument('--compare-phc', default=True, help='Compare with PHC method')
-    
+    parser.add_argument('--same-weight', action='store_true', help='Use same weight for human and AI matrices')
     args = parser.parse_args()
     
     try:
@@ -442,8 +390,6 @@ if __name__ == "__main__":
         
         # Fit vectorizer on training data only
         train_texts = df_train['human'].tolist() + df_train['ChatGPT'].tolist()
-        #vocab = get_vocab(''.join([doc + " " for doc in train_texts]), max_length=10000000)
-        #print("vocabbbbbbb = ",len(vocab))
         shared_vectorizer = CountVectorizer(
         stop_words=stop_words,
         min_df=5,
@@ -499,14 +445,26 @@ if __name__ == "__main__":
                             n_fold_train = len(df_fold_train)
                             D_h = X_fold_train[:,:n_fold_train]
                             D_ai = X_fold_train[:,n_fold_train:]
-                            
-                            # Run TopicScore
-                            results_h = topic_score(K, D_h)
-                            results_ai = topic_score(K, D_ai)
-                            
-                            A_h = results_h['A_hat']
-                            A_ai = results_ai['A_hat']
-                            
+                            if args.same_weight:
+                                # Stack matrices vertically and normalize by 2
+                                D_combined = np.vstack([D_h, D_ai]) / 2
+                                
+                                # Run topic_score once on combined matrix
+                                results_combined = topic_score(K, D_combined)
+                                
+                                # Split the result back into human and AI matrices
+                                p = D_h.shape[0]  # number of words
+                                A_combined = results_combined['A_hat']
+                                A_h = A_combined[:p, :]
+                                A_ai = A_combined[p:, :]
+                            else:
+                                # Run TopicScore
+                                results_h = topic_score(K, D_h)
+                                results_ai = topic_score(K, D_ai)
+                                
+                                A_h = results_h['A_hat']
+                                A_ai = results_ai['A_hat']
+                                
                             # Filter words
                             filtered_results = filter_words(A_h, A_ai, threshold, vocabulary)
                             
@@ -580,13 +538,27 @@ if __name__ == "__main__":
         n_train = len(df_train)
         D_h = X_train[:,:n_train]
         D_ai = X_train[:,n_train:]
-        
-        # Train TopicScore model
-        results_h = topic_score(int(best_K), D_h)
-        results_ai = topic_score(int(best_K), D_ai)
-        
-        A_h = results_h['A_hat']
-        A_ai = results_ai['A_hat']
+
+        if args.same_weight:
+            print("Stacking matrices")
+            # Stack matrices vertically and normalize by 2
+            D_combined = np.vstack([D_h, D_ai]) / 2
+            
+            # Run topic_score once on combined matrix
+            results_combined = topic_score(int(best_K), D_combined)
+            
+            # Split the result back into human and AI matrices
+            p = D_h.shape[0]  # number of words
+            A_combined = results_combined['A_hat']
+            A_h = A_combined[:p, :]
+            A_ai = A_combined[p:, :]
+        else:
+            # Train TopicScore model
+            results_h = topic_score(int(best_K), D_h)
+            results_ai = topic_score(int(best_K), D_ai)
+            
+            A_h = results_h['A_hat']
+            A_ai = results_ai['A_hat']
         
         print("\nTop words in Human Topics:")
         print("=" * 50)
@@ -677,8 +649,8 @@ if __name__ == "__main__":
             )
             # Run PHC with shared vocabulary
           
-            print(phc_preds)
-            print("true = ",phc_true)
+            # print(phc_preds)
+            # print("true = ",phc_true)
             phc_accuracy = phc_accuracy(phc_preds, phc_true)
             print("\nPHC Results:")
             print(f"Accuracy: {phc_accuracy:.4f}")
