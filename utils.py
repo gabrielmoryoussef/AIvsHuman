@@ -124,10 +124,6 @@ def extract_llm_answer(chat_completion) -> str:
     else:
         return 'No answer found'
 
-
-
-
-
 def extract_llm_answer_new(chat_completion):
     # Get the content from the first choice
     content = chat_completion.choices[0].message.content
@@ -136,6 +132,7 @@ def extract_llm_answer_new(chat_completion):
     think_start = content.find('<think>') + len('<think>')
     think_end = content.find('</think>')
     thoughts = content[think_start:think_end].strip() if think_start > -1 and think_end > -1 else ""
+    print("thoughts = ", thoughts)
     
     # Look for prediction in the last 100 characters of thoughts
     # (since the conclusion typically appears at the end)
@@ -156,8 +153,40 @@ def extract_llm_answer_new(chat_completion):
     return thoughts, prediction
 
 
+
+
+
+
+def make_nvidia_request(clients, messages, model_name, max_retries_per_client=2):
+    """Helper function to try multiple NVIDIA API clients with credit rotation"""
+    for client in list(clients):  # Iterate over a copy to allow modification
+        for attempt in range(max_retries_per_client):
+            try:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    temperature=0.1,
+                    stream=False
+                )
+                return response
+            except Exception as e:
+                # Handle credit exhaustion errors (adjust these conditions based on actual API errors)
+                if any(err in str(e).lower() for err in ["insufficient credit", "quota exceeded", "payment required"]):
+                    print(f"Credit exhausted for a client. Removing from pool.")
+                    clients.remove(client)
+                    break
+                else:
+                    print(f"Attempt {attempt + 1} failed. Error: {str(e)}")
+                    if attempt < max_retries_per_client - 1:
+                        time.sleep(1)
+                        continue
+                    else:
+                        break
+    raise Exception("All NVIDIA API clients failed after retries.")
+
+
 def llm_classifier(test_documents, selected_words_info=None, api_key=None, base_url='https://api.deepseek.com',
-                 model="llama3.1-70b", max_retries=10, delay_between_calls=0.1, human_words=None, ai_words=None):
+                 model="llama3.1-70b", max_retries=2, delay_between_calls=0.1, human_words=None, ai_words=None,nvidia_api_keys=None):
     """
     A classifier that determines whether text is human-written or AI-generated using various LLM APIs.
     Updated to use Llama through the OpenAI-style API interface.
@@ -174,17 +203,7 @@ def llm_classifier(test_documents, selected_words_info=None, api_key=None, base_
             if api_key is None:
                 raise ValueError("No API key provided and ANTHROPIC_API_KEY not found in environment")
         claude_client = Anthropic(api_key=api_key)
-    elif model.startswith("llama") or 'reasoner' in model:
-        base_url = "https://api.llama-api.com"
-        # Configure Llama client using OpenAI interface
-        if api_key is None:
-            api_key = os.getenv('LLAMA_API_KEY')
-            if api_key is None:
-                raise ValueError("No API key provided and LLAMA_API_KEY not found in environment")
-        llama_client = OpenAI(
-            api_key=api_key,
-            base_url=base_url
-        )
+    
     elif "gpt" in model:
         if api_key is None:
             api_key = os.getenv('OPENAI_API_KEY')
@@ -192,13 +211,32 @@ def llm_classifier(test_documents, selected_words_info=None, api_key=None, base_
                 raise ValueError("No API key provided and OPENAI_API_KEY not found in environment")
         client = OpenAI(api_key=api_key)
 
-    # elif "reasoner" in model:
-    #     client = OpenAI(
-    #     base_url = "https://integrate.api.nvidia.com/v1",
-    #     api_key = os.getenv("NVIDIA_API_KEY")
-    #     )
-        # print("all gut")
-        # print(time.sleep(20))
+    elif model.startswith("llama") or "reasoner" in model:
+        # Initialize NVIDIA clients with multiple API keys
+        if nvidia_api_keys is None:
+            # Try to get from environment variables if not provided
+            nvidia_api_keys = []
+            idx = 1
+            while True:
+                key = os.getenv(f"NVIDIA_API_KEY_{idx}")
+                if key is None:
+                    break
+                nvidia_api_keys.append(key)
+                idx += 1
+            # Fallback to single API key
+            if not nvidia_api_keys:
+                key = os.getenv("NVIDIA_API_KEY")
+                if key:
+                    nvidia_api_keys = [key]
+        
+        if not nvidia_api_keys:
+            raise ValueError("No NVIDIA API keys provided or found in environment")
+        
+        # Create client instances
+        nvidia_clients = [OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=key
+        ) for key in nvidia_api_keys]
     else:
         if api_key is None:
             api_key = os.getenv('DEEPSEEK_API_KEY')
@@ -236,20 +274,49 @@ def llm_classifier(test_documents, selected_words_info=None, api_key=None, base_
         discriminative_info = ""
    
     # Define system prompt
-    system_prompt = f"""You are a classifier that determines whether text is human-written or written by an AI. 
-    You will be given academic abstracts that are either written by humans or by AI.{discriminative_info}
-    
-    Respond with exactly one word: either 'human' for human-written text or 'ChatGPT' for AI-edited text. 
-    Be as accurate as possible in your classification, considering both the writing style and the presence of characteristic words."""
+    system_prompt_reasoner = f"""You are a classifier that determines whether text is human-written or written by ChatGPT. 
+    You will be given academic abstracts that are either written by humans or by ChatGPT.{discriminative_info}
+
+    Respond with exactly one word: either 'human' for human-written text or 'ChatGPT' for ChatGPT-written text. 
+    Be as accurate as possible in your classification, considering both the writing style and the presence of characteristic words.
+    End your reasoning answer with either human or  ChatGPT. Make sure that your last word is one of human or ChatGPT not a synonym. So do not end with
+    something like 'this fits for AI-written' just finish with 'human' or 'ChatGPT'!
+
+    Example:
+    Input: "This is a human-written abstract."
+    Output: The answer is "human"
+
+    Input: "This is an AI-generated abstract."
+    Output: The answer is "ChatGPT" 
+
+
+    """
+
+    system_prompt = f"""You are a classifier that determines whether text is human-written or written by ChatGPT. 
+    You will be given academic abstracts that are either written by humans or by ChatGPT.{discriminative_info}
+
+    Respond with exactly one word: either 'human' for human-written text or 'ChatGPT' for ChatGPT-written text. 
+    Be as accurate as possible in your classification, considering both the writing style and the presence of characteristic words.
+
+    Example:
+    Input: "This is a human-written abstract."
+    Output: "human"
+
+    Input: "This is an AI-generated abstract."
+    Output: "ChatGPT" 
+
+
+    """
    
     # Process each document
     responses = []
     for i, doc in enumerate(test_documents):
         if i % 10 == 0:
             print(f"Processing document {i+1}/{len(test_documents)}")
-            if model=='gemini':
-                print("sleeping for 10s")
-                time.sleep(30)
+            # if model=='gemini' or 'llama' in model:
+            #     # print("sleeping for 10s")
+            #     # time.sleep(30)
+            
             
         for attempt in range(max_retries):
             try:
@@ -274,21 +341,10 @@ def llm_classifier(test_documents, selected_words_info=None, api_key=None, base_
                     prediction = response.content[0].text.strip().lower()
                 
                 elif model.startswith("llama"):
-                    model = "llama3.1-8b"
-                    # Use OpenAI-style interface for Llama
                     messages = [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"Classify this text: {doc}"}
+                        {"role": "user", "content": f"{system_prompt_reasoner}. Classify this text: {doc}"}
                     ]
-                    
-                    response = llama_client.chat.completions.create(
-                        model=model,
-                        messages=messages,
-                        temperature=0.1,  # Adjusted temperature for slightly varied outputs
-                        max_tokens=1,     # We only need one word
-                        stream=False      # No streaming needed for classification
-                    )
-                    
+                    response = make_nvidia_request(nvidia_clients, messages,model_name='meta/llama3-8b-instruct')                           
                     prediction = response.choices[0].message.content.strip().lower()
                 
                 elif 'gpt' in model:
@@ -313,27 +369,14 @@ def llm_classifier(test_documents, selected_words_info=None, api_key=None, base_
 
                 elif "reasoner" in model:
                     messages = [
-                        {"role": "user", "content": f"{system_prompt}. Classify this text: {doc}"}
+                        {"role": "user", "content": f"{system_prompt_reasoner}. Classify this text: {doc}"}
                     ]
                     
-                    # response = client.chat.completions.create(
-                    #     model="deepseek-ai/deepseek-r1",
-                    #     messages=messages,
-                    #     temperature=0.6,
-                    #     # max_tokens=250,
-                    #     stream=False
-                    # )
-                    response = llama_client.chat.completions.create(
-                        model="deepseek-r1",
-                        messages=messages,
-                        temperature=0.6,
-                        # max_tokens=250,
-                        stream=False
-                    )
-                    #print("response = ",response)
+                    response = make_nvidia_request(nvidia_clients, messages,model_name='meta/llama3-8b-instruct')
                     responses.append(response)
                     #print(response)
                     thought, prediction = extract_llm_answer_new(response)
+                    #print("though = ",thought)
                     thoughts.append(thought)
                     #print("prediction = ",prediction)
 
@@ -347,7 +390,7 @@ def llm_classifier(test_documents, selected_words_info=None, api_key=None, base_
                     response = client.chat.completions.create(
                         model=model,
                         messages=messages,
-                        temperature=0.5,
+                        temperature=0.1,
                         max_tokens=1,
                         stream=False
                     )
