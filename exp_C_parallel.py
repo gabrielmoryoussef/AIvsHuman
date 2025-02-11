@@ -16,11 +16,12 @@ import traceback
 from Classifiers.PHC import get_pvals as phc_get_pvals, accuracy as phc_accuracy, clean_text as phc_clean_text
 import time
 from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
-from utils import *
+# from utils import *
+from utils_2 import *
 
 # Configuration
-MODELS = ['deepseek-reasoner', 'llama', 'claude-3-5-sonnet', 'gpt-4o-mini', 'gemini']
-N_FOLDS = 10
+MODELS = ['llama', 'claude-3-5-sonnet', 'deepseek-reasoner', 'gpt-4o-mini', 'gemini']
+N_FOLDS = 5
 ADDITIONAL_STOPS = ['Abstract']
 
 def preprocess_text(text):
@@ -58,7 +59,7 @@ def run_phc(train_df, test_df, vocabulary):
         return None, None, None
 
 
-def process_author(author, df, output_dir="results"):
+def process_author(author, df, output_dir="results_edited"):
     author_data = df[df['author'] == author].copy()
     if len(author_data) < 20:
         return None, None
@@ -130,7 +131,7 @@ def process_author(author, df, output_dir="results"):
                         record[f'{model}_phc_pred'] = phc_results['predictions'][i]
                         
                         # Capture DeepSeek thoughts
-                        if model == 'deepseek':
+                        if model == 'deepseek-reasoner':
                             all_thoughts.append({
                                 'author': author,
                                 'fold': fold,
@@ -161,7 +162,16 @@ def process_author(author, df, output_dir="results"):
     return prediction_df, thoughts_df
 
 if __name__ == "__main__":
-    df = pd.read_csv('data_gpt.csv')
+    df = pd.read_csv('data_edited.csv')
+    for col in ['human', 'ChatGPT']:
+        if col in df.columns:
+            # Remove specific phrases and non-alphabetic characters
+            df[col] = df[col].apply(lambda x: re.sub("All rights", "", str(x)))
+            df[col] = df[col].apply(lambda x: re.sub("reserved", "", str(x)))
+            df[col] = df[col].apply(lambda x: re.sub("[^A-Za-z ]", "", str(x)))
+            df[col] = df[col].apply(lambda x: re.sub("copyright", "", str(x)))
+            # Additional cleanup
+            df[col] = df[col].apply(lambda x: ' '.join(x.split()))  # Remove extra whitespac
     selected_authors = pd.read_csv("single_GPT.csv")["author"].unique().tolist()
     
     all_thoughts = []
@@ -178,4 +188,4 @@ if __name__ == "__main__":
     # Save all DeepSeek thoughts
     if all_thoughts:
         final_thoughts = pd.concat(all_thoughts)
-        final_thoughts.to_csv("deepseek_thoughts.csv", index=False)
+        final_thoughts.to_csv("deepseek_thoughts_edited.csv", index=False)
