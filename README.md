@@ -6,12 +6,11 @@ This repository contains the code and resources for our NeurIPS submission paper
 
 - **Classifiers/**: Contains all classifier implementations used in the paper, including:
   - MPU (Multiscale Positive-Unlabeled)
-  - PHC (Paired-Human Classifier)
-  - TopicScore
-  - TF-IDF
+  - HC 
+  - HC-GPT
   - DetectGPT
   - RoBERTa-Finetuned
-  - RoBERTa-Stylo
+  - RoBERTa
 
 - **src/**: Core implementation code and utilities
 - **cache_files/**: Cached model outputs and intermediate results
