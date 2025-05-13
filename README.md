@@ -10,11 +10,7 @@ This repository contains the code and resources for our NeurIPS submission paper
   - HC-GPT
   - DetectGPT
   - RoBERTa-Finetuned
-  - RoBERTa
 
-- **src/**: Core implementation code and utilities
-- **cache_files/**: Cached model outputs and intermediate results
-- **results/**: Experiment results and performance metrics
 
 ## Running Experiments
 
