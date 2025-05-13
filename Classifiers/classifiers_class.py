@@ -50,7 +50,11 @@ import torch, torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from transformers import AutoTokenizer, AutoModel, get_linear_schedule_with_warmup
+from transformers import (GPT2LMHeadModel, GPT2TokenizerFast,
+                          T5ForConditionalGeneration, T5Tokenizer)
 
+
+from pydetectgpt import detect_ai_text
 
 # Ignore transformer warnings
 warnings.filterwarnings("ignore")
@@ -460,160 +464,6 @@ class TFIDFClassifier(TextClassifier):
         # Transform texts and predict
         X_test_tfidf = self.vectorizer.transform(X_test)
         return self.classifier.predict(X_test_tfidf)
-# class PHCClassifier:
-#     """Paired Human Classifier implementation"""
-    
-#     def __init__(self, max_vocab_length: int = 5000, gamma: float = 0.25, 
-#                  threshold: float = 0.99, ef_corr: bool = True):
-#         self.max_vocab_length = max_vocab_length
-#         self.gamma = gamma
-#         self.threshold = threshold
-#         self.ef_corr = ef_corr
-#         self.vocabulary = None
-#         self.selected_words_info = None
-#         self.vectorizer = None
-        
-#     def _topk_frequent(self, nums: List, k: int) -> List:
-#         """Get top-k frequent items"""
-#         dic = Counter(nums)
-#         heapmax = [[-freq, num] for num, freq in dic.items()]
-#         heapq.heapify(heapmax)
-#         return [heapq.heappop(heapmax)[1] for _ in range(min(k, len(heapmax)))]
-    
-#     def _get_vocab(self, text: str) -> List[str]:
-#         """Extract vocabulary from text"""
-#         vocab = text.split()
-#         k = min(self.max_vocab_length, len(set(vocab)))
-#         return self._topk_frequent(vocab, k)
-    
-#     def _clean_text(self, text: str) -> str:
-#         """Clean text according to PHC requirements"""
-#         text = re.sub("All rights", "", text)
-#         text = re.sub("reserved", "", text)
-#         text = re.sub("[^A-Za-z ]", "", text)
-#         text = re.sub("copyright", "", text)
-#         return text.lower()
-    
-#     def _doc_to_dtm(self, texts: List[str], vocab: List[str]) -> np.ndarray:
-#         """Convert documents to document-term matrix"""
-#         stop_words = list(text_.ENGLISH_STOP_WORDS)
-#         additional_stops = ['Abstract']
-#         stop_words.extend(additional_stops)
-        
-#         self.vectorizer = CountVectorizer(
-#             tokenizer=lambda txt: txt.split(),
-#             vocabulary=vocab,
-#             stop_words=stop_words
-#         )
-#         return self.vectorizer.transform(texts).toarray()
-    
-#     def _estimate_poisson(self, corpus: np.ndarray) -> np.ndarray:
-#         """Estimate Poisson parameters"""
-#         return np.mean(corpus, axis=0)
-    
-#     def _higher_criticism(self, pvals: np.ndarray) -> Tuple[float, int]:
-#         """Compute Higher Criticism statistic"""
-#         pvals = np.sort(pvals[pvals <= self.threshold])
-#         N = len(pvals)
-#         hc = -1000
-#         i_star = 0
-        
-#         for i in range(1, int(self.gamma * N) + 1):
-#             if pvals[i-1] >= 1/N:
-#                 num = np.sqrt(N) * ((i/N) - pvals[i-1])
-#                 den = np.sqrt((i/N) * (1-i/N))
-#                 cur = num/den
-#                 if cur > hc:
-#                     hc = cur
-#                     i_star = i
-#         return hc, i_star
-    
-#     def _evaluate(self, new_data: np.ndarray, c1: np.ndarray, c2: np.ndarray) -> np.ndarray:
-#         """Evaluate new data"""
-#         return new_data - ((c1.sum(axis=0) + c2.sum(axis=0))/(c1.shape[0] + c2.shape[0]))
-    
-#     def fit(self, X: pd.Series, y: pd.Series) -> 'PHCClassifier':
-#         """Fit the PHC classifier"""
-#         # Clean and prepare texts
-#         cleaned_texts = [self._clean_text(text) for text in X]
-        
-#         # Get vocabulary if not provided
-#         if self.vocabulary is None:
-#             self.vocabulary = self._get_vocab(' '.join(cleaned_texts))
-        
-#         # Split data by class
-#         text1 = [t for t, l in zip(cleaned_texts, y) if l == 'human']
-#         text2 = [t for t, l in zip(cleaned_texts, y) if l == 'ChatGPT']
-        
-#         # Convert to document-term matrices
-#         corpus1 = self._doc_to_dtm(text1, self.vocabulary)
-#         corpus2 = self._doc_to_dtm(text2, self.vocabulary)
-        
-#         # Calculate statistics
-#         lam_1 = self._estimate_poisson(corpus1)
-#         lam_2 = self._estimate_poisson(corpus2)
-        
-#         sx = np.std(corpus1, axis=0) + 1e-10
-#         sy = np.std(corpus2, axis=0) + 1e-10
-        
-#         z = (lam_1 - lam_2) / np.sqrt((sx**2/corpus1.shape[0]) + (sy**2/corpus2.shape[0]))
-#         sign_z = np.sign(z)
-        
-#         if self.ef_corr:
-#             z_n = (z - np.mean(z)) / np.std(z)
-#         else:
-#             z_n = z
-            
-#         # Calculate p-values and HC
-#         pvals = 1 - norm.cdf(np.abs(z_n))
-#         _, i_star = self._higher_criticism(pvals)
-        
-#         # Store selected words info
-#         selected_indices = pvals <= np.sort(pvals)[i_star]
-#         self.selected_words_info = []
-        
-#         for idx, is_selected in enumerate(selected_indices):
-#             if is_selected:
-#                 self.selected_words_info.append({
-#                     'word': self.vocabulary[idx],
-#                     'effect_size': abs(z[idx]),
-#                     'p_value': pvals[idx],
-#                     'direction': 'human' if z[idx] > 0 else 'ChatGPT',
-#                     'sign': sign_z[idx]
-#                 })
-#         # Sort by effect size
-#         self.selected_words_info.sort(key=lambda x: x['effect_size'], reverse=True)
-#         print(f"Using {len(self.selected_words_info)} words!")
-#         for word_info in self.selected_words_info[:20]:  # Show top 20 words
-#             print(f"{word_info['word']:<20} {word_info['effect_size']:>12.4f} {word_info['p_value']:>10.4f} {word_info['direction']:>15}")
-#         return self
-    
-#     def predict(self, X: pd.Series) -> np.ndarray:
-#         """Predict using the PHC classifier"""
-#         if not self.selected_words_info:
-#             raise ValueError("Classifier must be fitted before making predictions")
-        
-#         # Clean and transform test texts
-#         cleaned_texts = [self._clean_text(text) for text in X]
-#         test_matrix = self._doc_to_dtm(cleaned_texts, self.vocabulary)
-        
-#         # Get selected features and their signs
-#         selected_indices = [i for i, word in enumerate(self.vocabulary) 
-#                           if any(w['word'] == word for w in self.selected_words_info)]
-#         signs = np.array([next(w['sign'] for w in self.selected_words_info 
-#                          if w['word'] == self.vocabulary[i]) 
-#                          for i in selected_indices])
-        
-#         # Make predictions
-#         test_selected = test_matrix[:, selected_indices]
-#         scores = signs * test_selected
-#         predictions = np.where(scores.sum(axis=1) > 0, 'human', 'ChatGPT')
-        
-#         return predictions
-    
-#     def get_discriminative_words(self) -> List[Dict]:
-#         """Return discriminative words and their statistics"""
-#         return self.selected_words_info
 
 
 class PHCClassifier:
@@ -1112,6 +962,146 @@ Classify the document below as either **human** (written entirely by a human) or
                 ts_pred = self.topic_score.predict(pd.Series([text]))
                 predictions.append(ts_pred[0])
         return np.array(predictions)
+
+
+class FastDetectGPT:
+
+    def __init__(self):
+        pass  # no model initialization needed
+    def fit(self, X: List[str], y: List[str]):
+        """No training necessary — placeholder to satisfy framework."""
+        return self
+
+    def predict(self, texts: List[str]) -> np.ndarray:
+      
+        predictions = [
+            "ChatGPT" if detect_ai_text(text) else "human"
+            for text in texts
+        ]
+        return np.array(predictions)
+
+
+class DetectGPTClassifier2:
+    """
+    DetectGPT-style detector with span-corruption perturbations produced by T5.
+
+    Parameters
+    ----------
+    gpt_name   : LM used for scoring   (default 'gpt2-medium')
+    t5_name    : LM used for noising   (default 't5-base')
+    k          : #perturbations per text (default 10)
+    mask_frac  : fraction of tokens to mask before refill (default 0.15)
+    max_len    : max sequence length for GPT-2 chunks (default 1024)
+    device     : 'cuda' / 'cpu'        (auto)
+    """
+
+    def __init__(self,
+                 gpt_name: str = "gpt2",
+                 t5_name : str = "t5-small",
+                 k       : int = 1,
+                 mask_frac: float = .15,
+                 max_len : int = 1024,
+                 device  : Optional[str] = None):
+
+        self.device   = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        print(f"Using {self.device}")
+        # scorer LM
+        self.scorer   = GPT2LMHeadModel.from_pretrained(gpt_name).to(self.device)
+        self.gtoker   = GPT2TokenizerFast.from_pretrained(gpt_name)
+        self.gtoker.pad_token = self.gtoker.eos_token
+        # perturbation LM
+        self.noiser   = T5ForConditionalGeneration.from_pretrained(t5_name).to(self.device)
+        self.ntoker   = T5Tokenizer.from_pretrained(t5_name)
+        # hyper-params
+        self.k         = k
+        self.mask_frac = mask_frac
+        self.max_len   = max_len
+        self.threshold = None   # learned in fit()
+
+    # ---------------------------------------------------------
+    # helpers
+    def _logprob(self, text: str) -> float:
+        """Average token log-prob under GPT-2 (handles long docs)."""
+        enc = self.gtoker(text, return_tensors="pt")
+        ids = enc.input_ids[0]
+        n   = ids.size(0)
+        if n <= self.max_len:
+            with torch.no_grad():
+                out = self.scorer(ids.unsqueeze(0).to(self.device), labels=ids.unsqueeze(0).to(self.device))
+            return -out.loss.item()            # negative NLL per token
+        # long text → sliding window
+        stride, ll_sum = self.max_len//2, 0.0
+        for i in range(0, n, stride):
+            beg = max(i+stride-self.max_len, 0); end = min(i+stride, n)
+            trg_len = end - i
+            inp  = ids[beg:end].unsqueeze(0).to(self.device)
+            labs = inp.clone()
+            labs[:, :-trg_len] = -100          # only predict last trg_len tokens
+            with torch.no_grad():
+                ll_sum -= self.scorer(inp, labels=labs).loss.item() * trg_len
+            if end == n: break
+        return ll_sum / n                      # average per token
+
+    def _mask_spans(self, tokens: List[str]) -> str:
+        """Randomly mask contiguous token spans à la span-corruption."""
+        L = len(tokens); num_mask = max(1, int(self.mask_frac * L))
+        mask_indices = sorted(random.sample(range(L), num_mask))
+        masked = []; cur = 0; span_id = 0
+        for i in range(L):
+            if mask_indices and i == mask_indices[0]:
+                masked.append(f"<extra_id_{span_id}>")
+                span_id += 1
+                while mask_indices and i == mask_indices[0]:
+                    mask_indices.pop(0); i += 1
+                if i >= L: break
+            masked.append(tokens[i])
+        masked.append(f"<extra_id_{span_id}>")
+        return " ".join(masked)
+
+    def _perturb(self, text: str) -> str:
+        """Produce a single noisy paraphrase with T5 span infilling."""
+        tok = self.ntoker
+        tokens = tok.tokenize(text)[:512]                      # keep it short
+        masked_input = self._mask_spans(tokens)
+        input_ids = tok(masked_input, return_tensors="pt").input_ids.to(self.device)
+        with torch.no_grad():
+            gen_ids = self.noiser.generate(input_ids, max_length=512, do_sample=True, top_p=.9, temperature=1.0)
+        return tok.decode(gen_ids[0], skip_special_tokens=True)
+
+    # ---------------------------------------------------------
+    # API
+    def fit(self, X_train: List[str], y_train: List[str]):
+        """Find threshold that maximises accuracy on training data."""
+        print(f"[DetectGPT] computing scores on {len(X_train)} training docs …")
+        scores = []
+        for txt in X_train:
+            lp0 = self._logprob(txt)
+            lps = [self._logprob(self._perturb(txt)) for _ in range(self.k)]
+            scores.append(lp0 - float(np.mean(lps)))          # curvature score
+        y_bin = np.array([0 if y.lower()=="human" else 1 for y in y_train])
+
+        best_acc = 0.0
+        for t in np.linspace(min(scores), max(scores), 100):
+            preds = (np.array(scores) < t).astype(int)        # lower score ⇒ AI
+            acc   = (preds == y_bin).mean()
+            if acc > best_acc:
+                best_acc, self.threshold = acc, t
+        print(f"[DetectGPT]  chosen threshold {self.threshold:.4f}  (train acc {best_acc:.4f})")
+        return self
+
+    @torch.no_grad()
+    def predict(self, X_test: List[str]) -> np.ndarray:
+        if self.threshold is None:
+            raise RuntimeError("Call fit() before predict().")
+        preds = []
+        for txt in X_test:
+            lp0 = self._logprob(txt)
+            lps = [self._logprob(self._perturb(txt)) for _ in range(self.k)]
+            score = lp0 - float(np.mean(lps))
+            preds.append("ChatGPT" if score < self.threshold else "human")
+        return np.array(preds)
+
+
 
 
 
@@ -1811,59 +1801,95 @@ def _pu_loss(logits: torch.Tensor, y: torch.Tensor, prior: float) -> torch.Tenso
 # ---------------------------------------------------------------------------
 # MPU Classifier
 # ---------------------------------------------------------------------------
+
 class MPUClassifier:
-    def __init__(self, model_name: str = 'roberta-base', *,
-                 max_len: int = 512, batch_size: int = 32, epochs: int = 1,
-                 lr: float = 5e-5, prior: Optional[float] = None, drop_p: float = 0.25,
-                 device: Optional[str] = None, verbose: bool = True):
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.backbone = AutoModel.from_pretrained(model_name)
-        self.classifier = nn.Linear(self.backbone.config.hidden_size, 2)
-        self.max_len, self.batch_size, self.epochs, self.lr = max_len, batch_size, epochs, lr
-        self.prior, self.drop_p, self.verbose = prior, drop_p, verbose
+    """Hugging Face model-based implementation of MPU Classifier"""
+    
+    def __init__(self, model_name: str = 'yuchuantian/AIGC_detector_env2', 
+                 max_len: int = 512, 
+                 batch_size: int = 32,
+                 device: Optional[str] = None, 
+                 verbose: bool = True):
+        """
+        Initialize the MPU classifier using a pre-trained Hugging Face model
+        
+        Args:
+            model_name: Name of the Hugging Face model (default is YuchuanTian/AIGC_text_detector)
+            max_len: Maximum sequence length
+            batch_size: Batch size for inference
+            device: Device to use (cuda or cpu)
+            verbose: Whether to print verbose output
+        """
+        self.model_name = model_name
+        self.max_len = max_len
+        self.batch_size = batch_size
+        self.verbose = verbose
         self.device = torch.device(device or ('cuda' if torch.cuda.is_available() else 'cpu'))
-        self.backbone.to(self.device); self.classifier.to(self.device)
-
-    # ---------- training ----------
-    def _estimate_prior(self, y: np.ndarray) -> float:
-        return float((y == 1).mean() or 0.5)
-
+        
+        if self.verbose:
+            print(f"Loading pre-trained MPU model from {model_name}")
+            print(f"Using device: {self.device}")
+        
+        # Initialize tokenizer and model directly from Hugging Face
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        self.model.to(self.device)
+        
     def fit(self, X: List[str], y_labels: List[str]):
-        if isinstance(X, (pd.Series, np.ndarray)):
-            X = X.tolist()
-        y = np.asarray([1 if t.lower() == 'human' else 0 for t in y_labels], int)
-        if self.prior is None:
-            self.prior = self._estimate_prior(y)
-            if self.verbose:
-                print(f'[MPU] estimated class prior πₚ = {self.prior:.3f}')
-        ds = _TextDataset(X, y, self.tokenizer, self.max_len, True, self.drop_p)
-        dl = DataLoader(ds, batch_size=self.batch_size, shuffle=True)
-        optim = torch.optim.AdamW(list(self.backbone.parameters())+list(self.classifier.parameters()), lr=self.lr)
-        sched = get_linear_schedule_with_warmup(optim, 0, self.epochs*len(dl))
-        self.backbone.train(); self.classifier.train()
-        for ep in range(self.epochs):
-            tot = 0.
-            for batch in dl:
-                ids, attn, lbl = batch['input_ids'].to(self.device), batch['attention_mask'].to(self.device), batch['labels'].to(self.device)
-                logits = self.classifier(self.backbone(input_ids=ids, attention_mask=attn).last_hidden_state[:,0])
-                loss = _pu_loss(logits, lbl, self.prior)
-                optim.zero_grad(); loss.backward(); optim.step(); sched.step(); tot += loss.item()
-            if self.verbose:
-                print(f'[MPU] epoch {ep+1}/{self.epochs}  loss={tot/len(dl):.4f}')
+        """
+        Dummy fit method (no training needed for pre-trained model)
+        
+        Args:
+            X: Training texts (not used)
+            y_labels: Training labels (not used)
+        """
+        if self.verbose:
+            print(f"Using pre-trained MPU model. No fitting required.")
         return self
-
-    # ---------- inference ----------
+        
     @torch.no_grad()
     def predict(self, X: List[str]) -> List[str]:
+        """
+        Make predictions using the pre-trained model
+        
+        Args:
+            X: Test texts
+            
+        Returns:
+            List of predictions ('human' or 'ChatGPT')
+        """
         if isinstance(X, (pd.Series, np.ndarray)):
             X = X.tolist()
-        self.backbone.eval(); self.classifier.eval()
-        ds = _TextDataset(X, None, self.tokenizer, self.max_len, False, self.drop_p)
-        dl = DataLoader(ds, batch_size=self.batch_size)
-        out = []
-        for batch in dl:
-            ids, attn = batch['input_ids'].to(self.device), batch['attention_mask'].to(self.device)
-            logits = self.classifier(self.backbone(input_ids=ids, attention_mask=attn).last_hidden_state[:,0])
-            prob_human = F.softmax(logits, dim=1)[:, 1]
-            out.extend(['human' if p >= 0.5 else 'ChatGPT' for p in prob_human.cpu()])
-        return out
+            
+        self.model.eval()
+        predictions = []
+        
+        # Process in batches
+        for i in range(0, len(X), self.batch_size):
+            batch_texts = X[i:i+self.batch_size]
+            
+            # Tokenize
+            inputs = self.tokenizer(
+                batch_texts,
+                max_length=self.max_len,
+                padding="max_length",
+                truncation=True,
+                return_tensors="pt"
+            ).to(self.device)
+            
+            # Get predictions
+            outputs = self.model(**inputs)
+            logits = outputs.logits
+            
+            # For MPU models, typically: 0 = AI, 1 = human
+            # But verify this with specific model documentation
+            pred_labels = torch.argmax(logits, dim=1).cpu().numpy()
+            
+            # Convert to expected format
+            batch_predictions = ['ChatGPT' if pred == 1 else 'human' for pred in pred_labels]
+            predictions.extend(batch_predictions)
+            
+            if self.verbose and i % 100 == 0:
+                print(f"Processed {i}/{len(X)} texts")
+                
+        return predictions
