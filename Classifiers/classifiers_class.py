@@ -685,60 +685,7 @@ class PHCLLMClassifier:
         human_words = [w['word'] for w in self.phc.selected_words_info if w['direction'] == 'human'][:30]
         ai_words = [w['word'] for w in self.phc.selected_words_info if w['direction'] == 'ChatGPT'][:30]
         
-        # prompt = f"""You are an expert forensic linguist.
-
-        # Task ─────────────────────────────────────────────
-        # Decide whether the following document was
-        # • written entirely by a human      → label “human”
-        # • edited or rewritten by ChatGPT   → label “ChatGPT”
-
-        # Prior knowledge ────────────────────────────────
-        # A trusted statistical detector (PHC) has already analysed the text:
-
-        # • PHC’s prediction:  {phc_prediction}
-
-        # Discriminative vocabulary discovered by PHC:
-        # • Common in human documents   :  {', '.join(human_words)}
-        # • Common in ChatGPT documents :  {', '.join(ai_words)}
-
-        # Guidelines for you ─────────────────────────────
-        # 1. Start from PHC’s prediction.  
-        # Override it ONLY if you see contrary evidence .
-        # 2. Give ONE token answer: exactly “human” or “ChatGPT”.  
-        # Do NOT include sentences, punctuation, or other text.
-
-        # Document ───────────────────────────────────────
-        # {text}
-        # ───────────────────────────────────────────────
-        # Answer with one word now:"""
-
-#         prompt = f"""You are an expert forensic linguist.
-
-#         Task ─────────────────────────────────────────────
-#         Decide whether the following document was
-#         • written entirely by a human      → label “human”
-#         • Written by a human but then edited or rewritten by ChatGPT   → label “ChatGPT”
-
-#         Prior knowledge ────────────────────────────────
-#         A trusted statistical detector (PHC) has already analysed the text:
-
-
-#         Discriminative vocabulary discovered by PHC:
-#         • Common in human documents   :  {', '.join(human_words)}
-#         • Common in documents edited by ChatGPT:  {', '.join(ai_words)}
-
         
-#         Think step-by-step.
-
-# When you are done, output **exactly one final line**:
-
-# prediction:<label>
-
-# where <label> is either human or ChatGPT (case-sensitive).
-#         Document ───────────────────────────────────────
-#         {text}
-#         ───────────────────────────────────────────────
-#         """
         prompt = f"""You are an expert forensic linguist.
 
         Task ─────────────────────────────────────────────
@@ -747,7 +694,7 @@ class PHCLLMClassifier:
         • Written by a human but then edited or rewritten by ChatGPT   → label “ChatGPT”
 
         Prior knowledge ────────────────────────────────
-        A trusted statistical detector (PHC) has already analysed the text:
+        A trusted statistical detector (HC) has already analysed the text:
 
 
         Discriminative vocabulary discovered by PHC:
@@ -770,48 +717,6 @@ where <label> is either human or ChatGPT (case-sensitive).
 
         return prompt
 
-
-
-        
-#     def _generate_prompt(self, text: str) -> str:
-#         """Generate prompt based on method"""
-#         if self.method == "llm_phc" and self.phc and self.phc.selected_words_info:
-#             # Get discriminative words from PHC
-#             human_words = [w['word'] for w in self.phc.selected_words_info if w['direction'] == 'human'][:20]
-#             ai_words = [w['word'] for w in self.phc.selected_words_info if w['direction'] == 'ChatGPT'][:20]
-            
-#             discriminative_info = (
-#             f"\n\nBased on statistical analysis, here are characteristic words:"
-#             f"\nTypically human-written: {', '.join(human_words)}"
-#             f"\nTypically corresponding to ChatGPT edited: {', '.join(ai_words)}"
-#         )
-#     #         system_prompt = f"""You are a classifier that determines whether text is human-written or written by a human but AI-edited. 
-#     # You will be given academic abstracts that are either written by humans or edited by AI.{discriminative_info}
-    
-#     # Respond with exactly one word: either 'human' for human-written text or 'ChatGPT' for AI-edited text. 
-#     # Be as accurate as possible in your classification, considering both the writing style and the presence of characteristic words."""
-#             system_prompt = f"""You are a classifier that determines whether a text is human-written or AI-edited.
-# You will be given  documents that are either written by humans or that were edited by AI. After running the Higher Criticism on the data \
-#     it gave the following discriminative info. {discriminative_info}
-# Respond with exactly one word: either 'human' if you think the following text is human-written text or 'ChatGPT' if you think it is AI-edited. 
-# Be as accurate as possible in your classification, considering both the writing style and especially the presence of the discriminative words."""
-        
-    
-            
-# #             prompt = f"""Analyze if this text is written by a human or AI.
-# # Words more common in human text: {', '.join(human_words)}
-# # Words more common in AI text: {', '.join(ai_words)}
-
-
-#         else:
-#             # system_prompt =   """You are a classifier that determines whether text is human-written or AI-edited. 
-#             # Respond with exactly one word: either 'human' for human-written text or 'ChatGPT' for AI-edited text. 
-#             # Be as accurate as possible in your classification."""
-#             system_prompt =   """You are a classifier that determines whether the given movie review is human-written or it was edited by ChatGPT. 
-#             Respond with exactly one word: either 'human' for human-written text or 'ChatGPT' for AI-edited text. 
-#             Be as accurate as possible in your classification."""
-
-#         return system_prompt
         
     def fit(self, X: pd.Series, y: pd.Series) -> 'PHCLLMClassifier':
         """Train PHC if using combined method"""
